@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>多智能体学习诊断系统 v0.2</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="page">
+        <header class="header">
+            <h1>面向精准教学的多智能体学习诊断系统</h1>
+            <p>v0.2：单个学生多题诊断 · 个人学习报告 · 个性化变式练习</p>
+        </header>
+
+        <main class="container">
+            <section class="card input-card">
+                <h2>学生作业信息</h2>
+
+                <div class="form-grid">
+                    <div>
+                        <label>学生姓名</label>
+                        <input id="student_name" value="张三">
+                    </div>
+
+                    <div>
+                        <label>年级</label>
+                        <input id="grade" value="小学三年级">
+                    </div>
+
+                    <div>
+                        <label>学科</label>
+                        <input id="subject" value="数学">
+                    </div>
+
+                    <div>
+                        <label>章节 / 知识范围</label>
+                        <input id="chapter" value="乘除法计算与应用题">
+                    </div>
+                </div>
+
+                <div class="section-title-row">
+                    <h2>作业题目</h2>
+                    <button class="small-btn" onclick="addQuestion()">添加题目</button>
+                </div>
+
+                <div id="questions"></div>
+
+                <button class="primary-btn" onclick="startStudentReport()">生成个人诊断报告</button>
+            </section>
+
+            <section class="card result-card">
+                <h2>个人学习诊断报告</h2>
+                <div id="loading" class="loading hidden">AI 多智能体正在协作分析中，请稍等……</div>
+                <div id="result" class="result"></div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        let questionCount = 0;
+
+        function addQuestion(defaultData = {}) {
+            questionCount += 1;
+
+            const wrapper = document.createElement("div");
+            wrapper.className = "question-box";
+
+            wrapper.innerHTML = `
+                <div class="question-header">
+                    <h3>第 ${questionCount} 题</h3>
+                    <button class="delete-btn" onclick="removeQuestion(this)">删除</button>
+                </div>
+
+                <label>题目</label>
+                <textarea class="question_text" placeholder="例如：计算 25 × 4 = ?">${defaultData.question_text || ""}</textarea>
+
+                <label>知识点</label>
+                <input class="knowledge_point" value="${defaultData.knowledge_point || ""}" placeholder="例如：两位数乘一位数">
+
+                <label>标准答案</label>
+                <input class="standard_answer" value="${defaultData.standard_answer || ""}" placeholder="例如：100">
+
+                <label>学生答案</label>
+                <input class="student_answer" value="${defaultData.student_answer || ""}" placeholder="例如：90">
+            `;
+
+            document.getElementById("questions").appendChild(wrapper);
+        }
+
+        function removeQuestion(button) {
+            button.closest(".question-box").remove();
+            renumberQuestions();
+        }
+
+        function renumberQuestions() {
+            const boxes = document.querySelectorAll(".question-box");
+            boxes.forEach((box, index) => {
+                box.querySelector("h3").innerText = `第 ${index + 1} 题`;
+            });
+        }
+
+        function getQuestions() {
+            const boxes = document.querySelectorAll(".question-box");
+            const questions = [];
+
+            boxes.forEach((box) => {
+                questions.push({
+                    question_text: box.querySelector(".question_text").value.trim(),
+                    knowledge_point: box.querySelector(".knowledge_point").value.trim(),
+                    standard_answer: box.querySelector(".standard_answer").value.trim(),
+                    student_answer: box.querySelector(".student_answer").value.trim()
+                });
+            });
+
+            return questions;
+        }
+
+        async function startStudentReport() {
+            const student_name = document.getElementById("student_name").value.trim();
+            const grade = document.getElementById("grade").value.trim();
+            const subject = document.getElementById("subject").value.trim();
+            const chapter = document.getElementById("chapter").value.trim();
+            const questions = getQuestions();
+
+            const resultDiv = document.getElementById("result");
+            const loadingDiv = document.getElementById("loading");
+
+            resultDiv.innerHTML = "";
+
+            if (!student_name || !subject || !chapter) {
+                resultDiv.innerHTML = `<div class="error">请填写学生姓名、学科和章节/知识范围。</div>`;
+                return;
+            }
+
+            if (questions.length === 0) {
+                resultDiv.innerHTML = `<div class="error">请至少添加一道题。</div>`;
+                return;
+            }
+
+            for (let i = 0; i < questions.length; i++) {
+                const q = questions[i];
+                if (!q.question_text || !q.knowledge_point || !q.standard_answer || !q.student_answer) {
+                    resultDiv.innerHTML = `<div class="error">第 ${i + 1} 题信息不完整。</div>`;
+                    return;
+                }
+            }
+
+            loadingDiv.classList.remove("hidden");
+
+            try {
+                const response = await fetch("/api/student_report", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        student_name,
+                        grade,
+                        subject,
+                        chapter,
+                        questions
+                    })
+                });
+
+                const data = await response.json();
+                loadingDiv.classList.add("hidden");
+
+                if (!data.success) {
+                    resultDiv.innerHTML = `<div class="error">${data.message}</div>`;
+                    return;
+                }
+
+                renderStudentReport(data.result);
+
+            } catch (error) {
+                loadingDiv.classList.add("hidden");
+                resultDiv.innerHTML = `<div class="error">请求失败：${error}</div>`;
+            }
+        }
+
+        function renderStudentReport(result) {
+            const studentInfo = result.student_info || {};
+            const questionResults = result.question_results || [];
+            const exercises = result.personalized_exercises || [];
+            const report = result.student_report || {};
+            const summary = report.summary || {};
+
+            let html = "";
+
+            html += `
+                <div class="report-block highlight-block">
+                    <h3>一、学生基本信息</h3>
+                    <p><strong>学生姓名：</strong>${studentInfo.student_name || "暂无"}</p>
+                    <p><strong>年级：</strong>${studentInfo.grade || "暂无"}</p>
+                    <p><strong>学科：</strong>${studentInfo.subject || "暂无"}</p>
+                    <p><strong>章节范围：</strong>${studentInfo.chapter || "暂无"}</p>
+                </div>
+            `;
+
+            html += `
+                <div class="report-block">
+                    <h3>二、总体学习表现</h3>
+                    <p><strong>总体评价：</strong>${summary.overall_comment || "暂无"}</p>
+                    <p><strong>正确题数：</strong>${summary.correct_count ?? "暂无"} / ${summary.total_count ?? "暂无"}</p>
+                    <p><strong>正确率：</strong>${summary.correct_rate || "暂无"}</p>
+                    <p><strong>主要错误类型：</strong>${(summary.main_error_types || []).join("、") || "暂无"}</p>
+                    <p><strong>薄弱知识点：</strong>${(summary.weak_knowledge_points || []).join("、") || "暂无"}</p>
+                </div>
+            `;
+
+            html += `
+                <div class="report-block">
+                    <h3>三、逐题批改与错因诊断</h3>
+            `;
+
+            questionResults.forEach(item => {
+                html += `
+                    <div class="question-result">
+                        <div class="question-result-title">
+                            <strong>第 ${item.question_number} 题</strong>
+                            <span class="${item.is_correct ? "tag-correct" : "tag-wrong"}">
+                                ${item.grading_result || "暂无"}
+                            </span>
+                        </div>
+                        <p><strong>得分：</strong>${item.score ?? "暂无"}</p>
+                        <p><strong>批改原因：</strong>${item.grading_reason || "暂无"}</p>
+                        <p><strong>错误类型：</strong>${item.error_type || "暂无"}</p>
+                        <p><strong>错误位置：</strong>${item.error_location || "暂无"}</p>
+                        <p><strong>薄弱知识点：</strong>${item.weak_knowledge_point || "暂无"}</p>
+                        <p><strong>错因分析：</strong>${item.diagnosis || "暂无"}</p>
+                        <p><strong>订正建议：</strong>${item.correction_advice || "暂无"}</p>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+
+            html += `
+                <div class="report-block">
+                    <h3>四、个性化变式练习</h3>
+            `;
+
+            if (exercises.length === 0) {
+                html += `<p>暂无变式练习。</p>`;
+            } else {
+                exercises.forEach(item => {
+                    html += `
+                        <div class="exercise-item">
+                            <p><strong>${item.difficulty || "练习"}题：</strong>${item.question || "暂无"}</p>
+                            <p><strong>针对知识点：</strong>${item.target_knowledge_point || "暂无"}</p>
+                            <p><strong>答案：</strong>${item.answer || "暂无"}</p>
+                            <p><strong>设计意图：</strong>${item.purpose || "暂无"}</p>
+                        </div>
+                    `;
+                });
+            }
+
+            html += `</div>`;
+
+            html += `
+                <div class="report-block">
+                    <h3>五、学习建议</h3>
+                    <ul>
+                        ${(report.learning_advice || []).map(item => `<li>${item}</li>`).join("") || "<li>暂无学习建议。</li>"}
+                    </ul>
+                </div>
+            `;
+
+            html += `
+                <div class="report-block">
+                    <h3>六、教师辅导建议</h3>
+                    <ul>
+                        ${(report.teacher_suggestion || []).map(item => `<li>${item}</li>`).join("") || "<li>暂无教师建议。</li>"}
+                    </ul>
+                </div>
+            `;
+
+            html += `
+                <div class="report-block student-feedback">
+                    <h3>七、给学生的反馈</h3>
+                    <p>${report.student_feedback || "暂无反馈。"}</p>
+                </div>
+            `;
+
+            document.getElementById("result").innerHTML = html;
+        }
+
+        window.onload = function () {
+            addQuestion({
+                question_text: "计算 25 × 4 = ?",
+                knowledge_point: "两位数乘一位数",
+                standard_answer: "100",
+                student_answer: "90"
+            });
+
+            addQuestion({
+                question_text: "计算 36 ÷ 6 = ?",
+                knowledge_point: "表内除法",
+                standard_answer: "6",
+                student_answer: "6"
+            });
+
+            addQuestion({
+                question_text: "小明有 12 个苹果，平均分给 3 个同学，每个同学分到几个苹果？",
+                knowledge_point: "平均分应用题",
+                standard_answer: "4",
+                student_answer: "3"
+            });
+        };
+    </script>
+</body>
+</html>
